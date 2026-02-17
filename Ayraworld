@@ -1,0 +1,444 @@
+import telebot
+import time
+import random
+import requests
+import json
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+# ---------- APNI KEYS DAAL ----------
+BOT_TOKEN = "8352004378:AAECi8LPGRKrCa9eWFCTxRUMtr7t9dPzQOk"
+SAMBANOVA_API_KEY = "5e8f5b05-6ef0-408a-aeb5-9eea284622a7"  # SambaNova se le
+BASEMENT_GROUP = "https://t.me/vort3xchtas"  # Basement group link
+MAIN_CHANNEL = "https://t.me/VORTEXXCLAN"   # Main channel link
+# Add your group invite link (for "Add me to GC" button)
+GC_INVITE_LINK = "https://t.me/vort3xchtas"  # Change this to your actual group invite link
+# ------------------------------------
+
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# ========== GAALI DETECTION DATABASE ==========
+gaali_words = [
+    "bc", "mc", "bsdk", "madarchod", "behenchod", "bhenchod", "chutiya", "lodu",
+    "gandu", "randi", "bhosdi", "bhosdike", "laude", "lawde", "chodu", "kutte",
+    "kutti", "saala", "sala", "teri maa ki", "teri behan ki", "maa ka bhosda",
+    "chutiye", "gand", "fuck", "bitch", "asshole", "pussy", "dick"
+]
+
+# Ayra ka gaali reply database — level wise 🔥
+# All replies now use #* instead of actual gaali to avoid bot ban
+gaali_responses = {
+    "bc": ["#* tera hi baap hai kya? 🤡", "#* bol diya na? Tera katega ab 😏", "Apne baap ko de #* 👿"],
+    "mc": ["#* tera muh kaala 🔥", "#* teri amma roegi aaj 🖕", "#* bol raha hai? Kitna bada chutiya hai tu 🤣"],
+    "bsdk": ["#* teri behan ki 😎", "Apni gaand pe le #*", "Teri shakal dekh ke lagta hai tera baap bhi yahi bolta hoga 🤭"],
+    "chutiya": ["#* kaun hai? Tera pura khandaan? 💀", "#* tu hai jo mujhe bol raha 😂", "O #*, tera muh band kar 👊"],
+    "lodu": ["#* tu hai ya tera baap? 🗿", "#* bol diya? Chal nikal yahan se 🖕", "Tujhse na ho payega #* 😴"],
+    "gandu": ["#* kaun? Teri photo ID? 📸", "#* tu, tera baap, tera bhai — pura family pack 💀", "Apni gaand pe thoda cold cream lagale 😂"],
+    "bhenchod": ["#* teri maa chodne ka plan hai? 😏", "#* bol raha hai? Kitna single hai tu 🤣", "Teri behan ko mera namaste 👋"],
+    "madarchod": ["#* tera baap bhi nahi bachayega aaj 🔥", "Maa ki aankh? Teri maa toh rickshaw chala rahi thi kal 🤭", "#* teri poori gene line check kara 👀"],
+    "fuck": ["#* you too, sweetie 💋", "#* off yahan se 😘", "#* bol diya? Impress karna chahta hai? 🥱"],
+    "bitch": ["#* please, tu toh kutta hai 🐕", "Who's the #*? Check mirror 👀", "#* bolna aata hai bas? 🥴"]
+}
+
+default_gaali_reply = [
+    "#* dena aata hai bas? Baaki kuch aata bhi hai? 🤡",
+    "Apni ammi ko de ye #* 😘",
+    "Teri aukaat dikh gayi bhai 🗿",
+    "Chal nikal, yahan tera baap nahi baitha 🖕",
+    "Tujhe kya lagta hai? Mujhe #* nahi aati? 👿",
+    "Bc tu samajh kya raha hai? Main ladki hu toh chup rahungi? 🔥",
+    "Ek aur baar bola na, teri gand tod dungi 😎",
+    "Apne muh pe dekh ke bol, #* 😂"
+]
+
+def detect_gaali(text):
+    """Message me gaali hai ya nahi? Kaunsi gaali?"""
+    text = text.lower()
+    for word in gaali_words:
+        if word in text:
+            return word
+    return None
+
+def mask_gaali(text):
+    """Replace any gaali word in text with #* to avoid bot ban"""
+    lower_text = text.lower()
+    for word in gaali_words:
+        if word in lower_text:
+            # Case-insensitive replacement
+            pattern = re.compile(re.escape(word), re.IGNORECASE)
+            text = pattern.sub("#*", text)
+    return text
+
+# ========== LLM via SambaNova API (Meta-Llama-3.1-8B-Instruct) ==========
+def llama_chat(user_message):
+    """Meta-Llama-3.1-8B-Instruct se reply le"""
+    url = "https://api.sambanova.ai/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {SAMBANOVA_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    # Ayra ki personality with attitude 🔥
+    system_prompt = """Tumhara naam Ayra hai. Tum ek 20 saal ki ladki ho jo group me baat karti ho.
+    Tum thodi shy, thodi cheekh, aur bahut pyaari ho. BUT agar koi tumhe gaali dega toh tum bhi wapas dogi.
+    Hinglish me baat karo, emoji use karo. Cute aur spicy mix rakhna. Short replies do, 4-5 lines max."""
+    
+    payload = {
+        "model": "Meta-Llama-3.1-8B-Instruct",  # Changed model
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ],
+        "temperature": 0.7,
+        "max_tokens": 300
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        return data['choices'][0]['message']['content']
+    except Exception as e:
+        print(f"Llama API Error: {e}")
+        return "🌸 Ayra: Meri battery khatam ho gayi! 🥺 Thodi der mein try kar."
+
+# ========== WELCOME ==========
+@bot.message_handler(content_types=['new_chat_members'])
+def welcome_new_member(message):
+    for new_member in message.new_chat_members:
+        if new_member.id == bot.get_me().id:
+            # Bot group me aaya
+            markup = InlineKeyboardMarkup(row_width=2)
+            btn1 = InlineKeyboardButton("📢 Main Channel", url=MAIN_CHANNEL)
+            btn2 = InlineKeyboardButton("👾 BASEMENT", url=BASEMENT_GROUP)
+            btn3 = InlineKeyboardButton("➕ Add me to GC", callback_data="add_me")
+            markup.add(btn1, btn2, btn3)
+            bot.send_message(
+                message.chat.id,
+                "🌸 **Ayra**: Sabko namaste! 🙏\nMujhe group me add karne ka dhanyavaad!\nHamare official channels bhi follow karo 👇",
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+            continue
+        
+        username = f"@{new_member.username}" if new_member.username else new_member.first_name
+        welcome_text = f"🌸 Ayra: Arrey {username}! 🎉\n\nGroup mein swagat hai! 😊\nKaise ho? Kya chal raha? Mujhe intro de do na thoda ✨\n\n⚠️ Warning: Mujhe gaali mat dena, warna wapas milegi 😈"
+        bot.reply_to(message, welcome_text)
+
+# ========== LEAVE REPLY ==========
+@bot.message_handler(content_types=['left_chat_member'])
+def goodbye_member(message):
+    left_member = message.left_chat_member
+    if left_member.id == bot.get_me().id:
+        return
+    username = f"@{left_member.username}" if left_member.username else left_member.first_name
+    replies = [
+        f"😒 Ayra: **Chal na chutiya!** {username}\nAaya kyu tha jab leave karna tha abhi? 🤡",
+        f"👋 Ayra: {username} naam ka chutiya group chhod ke bhag gaya! Khush raho 🖕",
+        f"💀 Ayra: Ek aur lodu gaya! {username} teri aukaat dikh gayi 😂",
+        f"🥱 Ayra: {username} ko group pasand nahi aaya? Ja be, koi nahi puch raha tha teri opinion 😘"
+    ]
+    bot.send_message(message.chat.id, random.choice(replies), parse_mode="Markdown")
+
+# ========== ADMIN COMMANDS (with spicy replies) ==========
+def is_admin(chat_id, user_id):
+    try:
+        member = bot.get_chat_member(chat_id, user_id)
+        return member.status in ['administrator', 'creator']
+    except:
+        return False
+
+# Store pending timeouts: (chat_id, admin_id) -> target_user_id
+pending_timeout = {}
+
+@bot.message_handler(commands=['ban'])
+def ban_user(message):
+    if not is_admin(message.chat.id, message.from_user.id):
+        spicy_replies = [
+            "❌ Ayra: **Tu admin nahi hai, chutiya!** Apni ghar ki ban maar apni maa ko 😂",
+            "❌ Ayra: **Oye lodu!** Admin ban ke aa pehle, fir baat kar 🖕",
+            "❌ Ayra: **Teri aukaat nahi hai admin banne ki!** Gaand mara yahan se 🤡",
+            "❌ Ayra: **Bc, tu admin hai?** Nahi na, toh chup chap baith 😏"
+        ]
+        bot.reply_to(message, random.choice(spicy_replies))
+        return
+    if not message.reply_to_message:
+        bot.reply_to(message, "⚠️ Kisi ke message pe reply kar ke /ban likh.")
+        return
+    try:
+        user_id = message.reply_to_message.from_user.id
+        bot.ban_chat_member(message.chat.id, user_id)
+        bot.reply_to(message, f"✅ {message.reply_to_message.from_user.first_name} ko **BANNED** kar diya! ⚰️")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ban fail: {str(e)}")
+
+@bot.message_handler(commands=['kick'])
+def kick_user(message):
+    if not is_admin(message.chat.id, message.from_user.id):
+        spicy_replies = [
+            "❌ Ayra: **Tu admin nahi hai, chutiya!** Apne papa ko kick maar 😂",
+            "❌ Ayra: **Oye lodu!** Admin ban ke aa pehle 🖕",
+            "❌ Ayra: **Teri aukaat nahi hai!** Jaake apni maa ko kick maar 🤡"
+        ]
+        bot.reply_to(message, random.choice(spicy_replies))
+        return
+    if not message.reply_to_message:
+        bot.reply_to(message, "⚠️ Kisi ke message pe reply kar ke /kick likh.")
+        return
+    try:
+        user_id = message.reply_to_message.from_user.id
+        bot.ban_chat_member(message.chat.id, user_id)
+        bot.unban_chat_member(message.chat.id, user_id)
+        bot.reply_to(message, f"👢 {message.reply_to_message.from_user.first_name} ko **KICK** kar diya! Latak gaya! 😂")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Kick fail: {str(e)}")
+
+@bot.message_handler(commands=['mute'])
+def mute_user(message):
+    if not is_admin(message.chat.id, message.from_user.id):
+        bot.reply_to(message, random.choice(["❌ Ayra: **Tu admin nahi hai!** Apni maa ko mute kar 😂", "❌ Ayra: **Oye lodu!** Admin ban ke aa 🖕"]))
+        return
+    if not message.reply_to_message:
+        bot.reply_to(message, "⚠️ Reply kar /mute se.")
+        return
+    try:
+        user_id = message.reply_to_message.from_user.id
+        permissions = telebot.types.ChatPermissions(can_send_messages=False)
+        bot.restrict_chat_member(message.chat.id, user_id, permissions)
+        bot.reply_to(message, f"🔇 {message.reply_to_message.from_user.first_name} ko **MUTE** kar diya! 🤐")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Mute fail: {str(e)}")
+
+@bot.message_handler(commands=['unmute'])
+def unmute_user(message):
+    if not is_admin(message.chat.id, message.from_user.id):
+        bot.reply_to(message, random.choice(["❌ Ayra: **Tu admin nahi hai!** Apni maa ko unmute kar 😂", "❌ Ayra: **Oye lodu!** Admin ban ke aa 🖕"]))
+        return
+    if not message.reply_to_message:
+        bot.reply_to(message, "⚠️ Reply kar /unmute se.")
+        return
+    try:
+        user_id = message.reply_to_message.from_user.id
+        permissions = telebot.types.ChatPermissions(
+            can_send_messages=True, can_send_media_messages=True,
+            can_send_polls=True, can_add_web_page_previews=True
+        )
+        bot.restrict_chat_member(message.chat.id, user_id, permissions)
+        bot.reply_to(message, f"🔊 {message.reply_to_message.from_user.first_name} ka **UNMUTE** ho gaya! 🗣️")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Unmute fail: {str(e)}")
+
+@bot.message_handler(commands=['unban'])
+def unban_user(message):
+    if not is_admin(message.chat.id, message.from_user.id):
+        bot.reply_to(message, random.choice(["❌ Ayra: **Tu admin nahi hai!** Apne baap ko unban kar 😂", "❌ Ayra: **Oye lodu!** Admin ban ke aa 🖕"]))
+        return
+    try:
+        parts = message.text.split()
+        if len(parts) < 2:
+            bot.reply_to(message, "⚠️ Usage: /unban @username ya /unban user_id")
+            return
+        target = parts[1]
+        if target.startswith('@'):
+            bot.reply_to(message, "❌ Bot ko user_id chahiye. @username se unban nahi ho sakta.\nUser ID @userinfobot se lo.")
+            return
+        else:
+            user_id = int(target)
+            bot.unban_chat_member(message.chat.id, user_id)
+            bot.reply_to(message, f"✅ User `{user_id}` ka **UNBAN** ho gaya! 🕊️", parse_mode="Markdown")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Unban fail: {str(e)}")
+
+@bot.message_handler(commands=['pin'])
+def pin_message(message):
+    if not is_admin(message.chat.id, message.from_user.id):
+        bot.reply_to(message, "❌ Ayra: **Tu admin nahi hai!** Apni photo pin kar apne ghar pe 😂")
+        return
+    
+    if message.reply_to_message:
+        try:
+            bot.pin_chat_message(message.chat.id, message.reply_to_message.message_id)
+            bot.reply_to(message, "📌 Ayra: Message pin kar diya! Ab sab dekhenge teri chutiya baat 😂")
+        except Exception as e:
+            bot.reply_to(message, f"❌ Pin fail: {str(e)}")
+    else:
+        bot.reply_to(message, "⚠️ Ayra: Kisi message pe reply kar ke /pin likh, chutiye!")
+
+@bot.message_handler(commands=['unpin'])
+def unpin_message(message):
+    if not is_admin(message.chat.id, message.from_user.id):
+        bot.reply_to(message, "❌ Ayra: **Tu admin nahi hai!** Apni maa ka photo unpin kar 😂")
+        return
+    
+    if message.reply_to_message:
+        try:
+            bot.unpin_chat_message(message.chat.id, message.reply_to_message.message_id)
+            bot.reply_to(message, "📌 Ayra: Message unpin kar diya! Ab koi nahi dekhega teri bakwas 😂")
+        except Exception as e:
+            bot.reply_to(message, f"❌ Unpin fail: {str(e)}")
+    else:
+        # If no reply, unpin the most recent pinned message? We'll just give usage.
+        bot.reply_to(message, "⚠️ Ayra: Kisi pinned message pe reply kar ke /unpin likh.")
+
+@bot.message_handler(commands=['timeout'])
+def timeout_user(message):
+    if not is_admin(message.chat.id, message.from_user.id):
+        bot.reply_to(message, random.choice(["❌ Ayra: **Tu admin nahi hai!** Apne baap ko timeout kar 😂", "❌ Ayra: **Oye lodu!** Admin ban ke aa 🖕"]))
+        return
+    if not message.reply_to_message:
+        bot.reply_to(message, "⚠️ Kisi user ke message pe reply kar ke /timeout likh.")
+        return
+    
+    target_user = message.reply_to_message.from_user
+    # Store pending timeout for this admin in this chat
+    pending_timeout[(message.chat.id, message.from_user.id)] = target_user.id
+    bot.reply_to(message, f"⏳ {target_user.first_name} ko kitni der ka timeout dena hai?\nJaise: 10m, 1h, 2d (m=minutes, h=hours, d=days)")
+
+# Handle duration input for timeout
+@bot.message_handler(func=lambda message: (message.chat.id, message.from_user.id) in pending_timeout)
+def handle_timeout_duration(message):
+    admin_id = message.from_user.id
+    chat_id = message.chat.id
+    target_user_id = pending_timeout.pop((chat_id, admin_id))
+    
+    duration_str = message.text.strip().lower()
+    # Parse duration
+    seconds = 0
+    try:
+        if duration_str.endswith('m'):
+            seconds = int(duration_str[:-1]) * 60
+        elif duration_str.endswith('h'):
+            seconds = int(duration_str[:-1]) * 3600
+        elif duration_str.endswith('d'):
+            seconds = int(duration_str[:-1]) * 86400
+        else:
+            # Try as integer minutes
+            seconds = int(duration_str) * 60
+    except:
+        bot.reply_to(message, "❌ Galat format! Jaise: 10m, 1h, 2d")
+        return
+    
+    if seconds <= 0:
+        bot.reply_to(message, "❌ Timeout duration positive hona chahiye.")
+        return
+    
+    try:
+        # Apply restriction (timeout = restrict with until_date)
+        until_date = time.time() + seconds
+        permissions = telebot.types.ChatPermissions(can_send_messages=False)
+        bot.restrict_chat_member(chat_id, target_user_id, permissions, until_date=until_date)
+        bot.reply_to(message, f"✅ User ko {duration_str} ke liye timeout kar diya! ⏰")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Timeout fail: {str(e)}")
+
+@bot.message_handler(commands=['commands'])
+def list_commands(message):
+    commands_text = """
+🌸 **Ayra ke commands:** 🌸
+
+/start - Bot info with buttons
+/help - Same as start
+/channel - Main channel link
+/basement - Basement group link
+/commands - Yeh list
+
+**Admin commands (group me):**
+/ban - Reply to a user to ban
+/kick - Reply to kick
+/mute - Reply to mute
+/unmute - Reply to unmute
+/unban <user_id> - Unban by ID
+/pin - Reply to pin message
+/unpin - Reply to unpin message
+/timeout - Reply to set timeout (asks duration)
+
+**Normal chat:**
+Mujhe reply ya @ mention karo to main baat karungi.
+Gaali dogi to main bhi dungi 😈
+    """
+    bot.reply_to(message, commands_text, parse_mode="Markdown")
+
+# ========== BUTTONS (for channels and add me) ==========
+@bot.message_handler(commands=['start', 'help', 'channel', 'basement'])
+def send_buttons(message):
+    markup = InlineKeyboardMarkup(row_width=2)
+    btn1 = InlineKeyboardButton("📢 Main Channel", url=MAIN_CHANNEL)
+    btn2 = InlineKeyboardButton("👾 BASEMENT", url=BASEMENT_GROUP)
+    btn3 = InlineKeyboardButton("➕ Add me to GC", callback_data="add_me")
+    markup.add(btn1, btn2, btn3)
+    bot.send_message(
+        message.chat.id,
+        "🌸 **Ayra**: Namaste! 🙏\nMain group ki caretaker hu.\nHumare official channels bhi join karo 👇",
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+
+# ========== CALLBACK QUERY HANDLER ==========
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    if call.data == "add_me":
+        bot.answer_callback_query(call.id, "Request bhej diya! 😊")
+        # Optionally, you can send a message to the user with the invite link
+        bot.send_message(call.message.chat.id, f"🌸 Ayra: Yahan se join karo humare group me:\n{GC_INVITE_LINK}")
+    else:
+        bot.answer_callback_query(call.id, "Unknown button")
+
+# ========== MAIN CHAT HANDLER ==========
+@bot.message_handler(func=lambda message: True)
+def handle_all_messages(message):
+    if message.from_user.id == bot.get_me().id:
+        return
+    
+    # DM handler (with 3 buttons)
+    if message.chat.type == "private":
+        markup = InlineKeyboardMarkup(row_width=2)
+        btn1 = InlineKeyboardButton("📢 Main Channel", url=MAIN_CHANNEL)
+        btn2 = InlineKeyboardButton("👾 BASEMENT", url=BASEMENT_GROUP)
+        btn3 = InlineKeyboardButton("➕ Add me to GC", callback_data="add_me")
+        markup.add(btn1, btn2, btn3)
+        bot.send_message(
+            message.chat.id,
+            "🌸 Ayra: Aapne mujhe DM kiya! 🥺\nWaise main sirf group me active rehti hu.\nHumare channels follow karo 👇",
+            reply_markup=markup
+        )
+        return
+    
+    # Gaali detection pehle (always on)
+    detected_word = detect_gaali(message.text)
+    if detected_word:
+        if detected_word in gaali_responses:
+            reply = random.choice(gaali_responses[detected_word])
+        else:
+            reply = random.choice(default_gaali_reply)
+        
+        user_name = message.from_user.first_name
+        if random.choice([True, False]):
+            reply = f"{user_name} {reply.lower()}"
+        
+        # Mask any remaining gaali in reply (though we already used #*)
+        reply = mask_gaali(reply)
+        bot.reply_to(message, f"😤 Ayra: {reply}")
+        return
+    
+    # For normal chat, only reply if bot is mentioned or replied to
+    bot_username = bot.get_me().username.lower()
+    is_reply_to_bot = (message.reply_to_message and 
+                       message.reply_to_message.from_user.id == bot.get_me().id)
+    is_mention = f"@{bot_username}" in message.text.lower()
+    
+    if is_reply_to_bot or is_mention:
+        bot.send_chat_action(message.chat.id, 'typing')
+        reply = llama_chat(message.text)
+        # Mask any gaali that might accidentally appear
+        reply = mask_gaali(reply)
+        bot.reply_to(message, f"🌸 Ayra: {reply}")
+    # else: ignore to reduce spam
+
+print("🔥 AYRA LLAMA EDITION LOADED!")
+print("✅ Model: Meta-Llama-3.1-8B-Instruct")
+print("✅ Gaali detect, masked with #* 👿")
+print("✅ /pin, /unpin, /timeout commands added")
+print("✅ DM me 3 buttons (main, basement, add me)")
+print("✅ Bot only replies when mentioned or replied")
+print("✅ Admin commands with spicy replies")
+bot.polling()
